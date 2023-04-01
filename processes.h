@@ -23,6 +23,19 @@
 #define SENSOR_PIPE "sensor_pipe"
 #define CONSOLE_PIPE "console_pipe"
 
+
+//user console SIGINT
+void ctrlc_handler(int signal_num)
+{
+    printf("Received SIGINT signal (Ctrl+C). Cleaning up resources and exiting...\n");
+
+    // Cleanup resources here...
+
+    // ...
+
+    exit(0);
+}
+
 int* SETUP();
 void SENSOR(char id[], int interval, char key[], int min, int max);
 
@@ -46,6 +59,7 @@ int* SETUP()
     int i = 0;
     while(fgets(line,10,f) != NULL)
     {
+        signal(SIGINT, ctrlc_handler);
         configurations[i] = atoi(line);
         i+=1;
     }
