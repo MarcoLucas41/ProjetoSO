@@ -5,10 +5,31 @@
 void menu(int fd);
 #define MAX_SIZE 256
 
+char *buffer;
+char *temp;
+char *ptr;
+int fd;
+
+//user console SIGINT
+void ctrlc_handler(int signal_num)
+{
+
+    printf("Received SIGINT signal (Ctrl+C). Cleaning up resources and exiting...\n");
+
+
+    // Cleanup resources here...
+    free(ptr);
+    free(temp);
+    free(buffer);
+    close(fd);
+    // ...
+
+    exit(0);
+}
+
+
 void menu(int fd)
 {
-    char *buffer;
-    char *temp;
     buffer = (char*)malloc(MAX_SIZE * sizeof(char));
     while(1)
     {
@@ -21,7 +42,7 @@ void menu(int fd)
 
 
         char *delim = " ";
-        char *ptr = strtok(temp, delim);
+        ptr = strtok(temp, delim);
 
         if(strcmp(ptr,"exit") == 0)
         {
@@ -55,6 +76,7 @@ void menu(int fd)
         }
         write(fd,buffer,sizeof(buffer));
     }
+    exit(0);
 }
 
 
@@ -71,7 +93,9 @@ int main(int argc, char *argv[])
     if ((fd = open(CONSOLE_PIPE, O_WRONLY)) < 0)
     {
         perror("Cannot open pipe for writing: ");
+        exit(0);
     }
+    signal(SIGINT,ctrlc_handler);
     menu(fd);
     exit(0);
 
