@@ -3,11 +3,11 @@
 //
 #include "processes.h"
 
-// Define a counter variable to keep track of the number of messages sent
+
 int message_counter = 0;
 
-// Define the SIGTSTP signal
-void ctrlz_handler(int signal_num)
+
+void ctrlz_handler(int signo)
 {
     printf("Received SIGTSTP signal (Ctrl+Z). Pausing...\n");
     printf("Total messages sent: %d\n", message_counter);
@@ -16,8 +16,7 @@ void ctrlz_handler(int signal_num)
     while(getc(stdin)!= '\n');
 }
 
-//sensor SIGINT
-void controlc_handler(int signo)
+void ctrlc_handler(int signo)
 {
     printf("Received SIGINT signal (Ctrl+C). Terminating...\n");
     exit(0);
@@ -30,6 +29,16 @@ int main(int argc, char *argv[])
     {
         perror("Wrong number of arguments for sensor!");
         exit(0);
+    }
+
+    if(strlen(argv[1]) < 3 || strlen(argv[1]) > 32)
+    {
+        perror("ID must be between 3 and 32 characters");
+
+    }
+    if(strlen(argv[3]) < 3 || strlen(argv[3]) > 32)
+    {
+        perror("Key must be between 3 and 32 characters");
     }
 
     char buffer[20];
@@ -47,11 +56,12 @@ int main(int argc, char *argv[])
 
     while(1)
     {
-        signal(SIGINT, controlc_handler);
+        signal(SIGINT, ctrlc_handler);
         num = rand()%(max-min) + min;
         snprintf(buffer,sizeof(buffer),"%s#%s#%d",argv[1],argv[3],num);
         write(fd,buffer,sizeof(buffer));
         sleep(atoi(argv[2]));
+        message_counter +=1;
     }
 }
 
