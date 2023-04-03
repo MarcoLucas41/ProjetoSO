@@ -5,6 +5,16 @@
 
 int* SETUP();
 
+//threads
+void *DISPATCHER(void *t);
+void *SENSOR_READER(void *t);
+void *CONSOLE_READER(void *t);
+
+//child processes
+void WORKER(int id);
+void ALERTS_WATCHER(int id);
+
+
 
 int* SETUP()
 {
