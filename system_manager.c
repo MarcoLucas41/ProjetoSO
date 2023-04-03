@@ -3,12 +3,13 @@
 //
 #include "processes.h"
 
+//setup
 int* SETUP();
 
 //threads
-void *DISPATCHER(void *t);
-void *SENSOR_READER(void *t);
-void *CONSOLE_READER(void *t);
+void *DISPATCHER(void *id);
+void *SENSOR_READER(void *id);
+void *CONSOLE_READER(void *id);
 
 //child processes
 void WORKER(int id);
@@ -29,6 +30,44 @@ int* SETUP()
     }
     return configurations;
 }
+
+void *DISPATCHER(void *id)
+{
+
+}
+
+
+void *CONSOLE_READER(void *id)
+{
+    int fd;
+    char *buffer;
+    if ((fd = open(CONSOLE_PIPE, O_WRONLY)) < 0)
+    {
+        perror("Cannot open pipe for reading: ");
+        pthread_exit(0);
+    }
+    while (1)
+    {
+        read(fd, &buffer, sizeof(buffer));
+    }
+
+}
+
+void *SENSOR_READER(void *id)
+{
+
+}
+
+void WORKER(int id)
+{
+
+}
+
+void ALERTS_WATCHER(int id)
+{
+
+}
+
 
 
 
@@ -56,10 +95,6 @@ int main(int argc, char *argv[])
     int id;
 
 
-
-
-
-
     //Initializing threads and child processes
     long thread_id[3];
     int child_id[N_WORKERS+MAX_SENSORS+1];
@@ -85,7 +120,6 @@ int main(int argc, char *argv[])
     //sigfillset(&novo.sa_mask);
     //novo.sa_flags = 0;
     //sigaction(SIGINT,&novo,NULL);
-
 
     pipe(WORKER_PIPE);
 
