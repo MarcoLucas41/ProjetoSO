@@ -3,7 +3,6 @@
 //
 #include "processes.h"
 void menu(int fd);
-#define MAX_SIZE 256
 
 char *buffer;
 char *temp;
@@ -15,8 +14,6 @@ void ctrlc_handler(int signal_num)
 {
 
     printf("Received SIGINT signal (Ctrl+C). Cleaning up resources and exiting...\n");
-
-
     // Cleanup resources here...
     free(ptr);
     free(temp);
@@ -30,11 +27,11 @@ void ctrlc_handler(int signal_num)
 
 void menu(int fd)
 {
-    buffer = (char*)malloc(MAX_SIZE * sizeof(char));
+    buffer = (char*)malloc(MAX_LEN_MSG * sizeof(char));
     while(1)
     {
-        temp = (char*)malloc(MAX_SIZE * sizeof(char));
-        fgets(temp, MAX_SIZE, stdin);
+        temp = (char*)malloc(MAX_LEN_MSG * sizeof(char));
+        fgets(temp, MAX_LEN_MSG, stdin);
         strcpy(buffer,temp);
 
         if ((strlen(temp) > 0) && (temp[strlen(temp) - 1] == '\n') )
@@ -46,6 +43,7 @@ void menu(int fd)
 
         if(strcmp(ptr,"exit") == 0)
         {
+            write(fd,buffer,sizeof(buffer));
             free(ptr);
             free(temp);
             free(buffer);
