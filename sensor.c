@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
         perror("Key must be between 3 and 32 characters");
     }
 
-    char buffer[20];
+    char buffer[MAX_LEN_MSG];
     int max,min;
     int num;
     int fd;
@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
         num = rand()%(max-min) + min;
         snprintf(buffer,sizeof(buffer),"%s#%s#%d",argv[1],argv[3],num);
         write(fd,buffer,sizeof(buffer));
-        sleep(atoi(argv[2]));
+        usleep(atoi(argv[2]));
         message_counter +=1;
     }
 }
