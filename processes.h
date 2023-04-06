@@ -21,11 +21,61 @@
 
 
 #define MAX_SIZE 256
-
+#define MAX_LEN_MSG 100
 #define SENSOR_PIPE "sensor_pipe"
 #define CONSOLE_PIPE "console_pipe"
 
+
+void setup();
 int config[5];
+int QUEUE_SZ,N_WORKERS,MAX_KEYS,MAX_SENSORS,MAX_ALERTS;
+
+
+
+void setup()
+{
+    char line[10];
+    FILE *f = fopen("~/Config.txt","r");
+    int i = 0;
+    while(fgets(line,10,f) != NULL)
+    {
+        config[i] = atoi(line);
+        if(config[0] < 1)
+        {
+            perror("QUEUE_SZ value should be >= 1!");
+            exit(0);
+        }
+        else if(config[1] < 1)
+        {
+            perror("N_WORKERS value should be >= 1!");
+            exit(0);
+        }
+        else if(config[2] < 1)
+        {
+            perror("MAX_KEYS value should be >= 1!");
+            exit(0);
+        }
+        else if(config[3] < 1)
+        {
+            perror("MAX_SENSORS value should be >= 1!");
+            exit(0);
+        }
+        else if(config[4] < 0)
+        {
+            perror("MAX_ALERTS value should be >= 0!");
+            exit(0);
+        }
+        i+=1;
+    }
+    QUEUE_SZ = config[0];
+    N_WORKERS = config[1];
+    MAX_KEYS = config[2];
+    MAX_SENSORS = config[3];
+    MAX_ALERTS = config[4];
+    fclose(f);
+}
+
+
 
 
 typedef struct SensorData
@@ -37,6 +87,7 @@ typedef struct SensorData
     double avg_values;
     int counter_updates_key;
     struct SensorData *next;
+
 }SensorData;
 
 
