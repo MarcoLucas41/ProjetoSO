@@ -213,6 +213,8 @@ int main(int argc, char *argv[])
     setup();
 
     signal(SIGINT,ctrlc_handler);
+    MessageQueue queue;
+    MessageQueueInitial(&queue);
 
     //creating named pipes
     if ((mkfifo(SENSOR_PIPE, O_CREAT|O_EXCL|0600)<0) && (errno!= EEXIST)) { perror("Cannot create SENSOR_PIPE: ");
