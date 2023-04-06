@@ -20,7 +20,6 @@
 #define PROJETOSO_PROCESSES_H
 
 
-#define MAX_SIZE 256
 #define MAX_LEN_MSG 100
 #define SENSOR_PIPE "sensor_pipe"
 #define CONSOLE_PIPE "console_pipe"
