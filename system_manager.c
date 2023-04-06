@@ -2,14 +2,12 @@
 // Created by Marco Lucas on 31/03/2023.
 //
 #include "processes.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <pthread.h>
-#include <string.h>
 
+//handler
+void ctrlc_handler(int signal_num);
 
 //setup
-int* SETUP();
+void create_shared_memory();
 
 //threads
 void *SENSOR_READER(void *id);
@@ -19,11 +17,26 @@ void *CONSOLE_READER(void *id);
 void WORKER(int id);
 void ALERTS_WATCHER(int id);
 
-#define QUEUE_SZ 10
-#define MAX_LEN_MSG 100
+int shmid;
+char **sensors;
+
+//shared memory region
+SharedMemory *region;
+
+
+
+
+
+
+
+
+
+
+
 
 typedef struct {
-    char messages[QUEUE_SZ][MAX_LEN_MSG];
+    const int queue_sz;
+    char *messages[MAX_LEN_MSG];
     int ri; //index do read
     int wi; //index do write
     int count;
@@ -78,91 +91,52 @@ void MessageQueueDequeue(MessageQueue *queue, char *message)
     pthread_cond_signal(&queue->not_full);
 }
 
-int* SETUP()
+
+//helper functions
+int check_sensor();
+int add_sensor();
+
+
+
+
+void create_shared_memory()
 {
-    int configurations[5];
-    char line[10];
-    FILE *f = fopen("~/Config.txt","r");
-    int i = 0;
-    while(fgets(line,10,f) != NULL)
-    {
-        configurations[i] = atoi(line);
-        i+=1;
-    }
-    return configurations;
+    shmid = shmget(IPC_PRIVATE,sizeof(SharedMemory),IPC_CREAT|0777);
+    region = shmat(shmid,NULL,0);
+    region->header->first = (SensorData*) malloc(sizeof(SensorData));
+    region->header->last = (SensorData*) malloc(sizeof(SensorData));
+
+    //sh->sensors[0] = (char*)malloc(32*sizeof(char));
 }
 
-void *CONSOLE_READER(void *id)
-{
-    int fd;
-    char *buffer;
-    if ((fd = open(CONSOLE_PIPE, O_WRONLY)) < 0)
-    {
-        perror("Cannot open pipe for reading: ");
-        pthread_exit(0);
-    }
-    while (1)
-    {
-        read(fd, &buffer, sizeof(buffer));
-    }
 
-}
 
-void *SENSOR_READER(void *id)
+
+
+//system manager SIGINT
+void ctrlc_handler(int signal_num)
 {
 
+    printf("Received SIGINT signal (Ctrl+C). Cleaning up resources and exiting...\n");
+
+    // Cleanup resources here...
+
+    //unlink named pipes
+    unlink(SENSOR_PIPE);
+    unlink(CONSOLE_PIPE);
+
+
+    //terminate shared memory
+    shmctl(shmid, IPC_RMID, NULL);
+    // ...
+
+    exit(0);
 }
 
-void *SENSOR_THREAD(void *id)
-{
-    int sensor_id = *(int*)id;
-    int sensor_fd;
-    char buffer[20];
 
-    if ((sensor_fd = open(SENSOR_PIPE, O_RDONLY)) < 0)
-    {
-        perror("Cannot open pipe for reading: ");
-        pthread_exit(0);
-    }
-
-    while (1)
-    {
-        if (read(sensor_fd, buffer, sizeof(buffer)) > 0)
-        {
-            printf("Sensor %d received data: %s\n", sensor_id, buffer);
-        }
-    }
-}
-
-void WORKER(int id)
-{
-
-}
-
-void ALERTS_WATCHER(int id)
-{
-
-}
-
-//READER THREAD
-void *READER_THREAD_FUNCTION(void *id)
-{
-    MessageQueue *queue = (MessageQueue *)id;
-    char msg[MAX_LEN_MSG];
-
-    while (1) {
-        // Reading from sensor pipe or console input
-        // ...
-
-        // Enqueueing message
-        MessageQueueEnqueue(queue, msg);
-    }
-
-    return NULL;
-}
 
 //DISPATCHER THREAD
-void *DISPATCHER_THREAD_FUNCTION(void *id)
+void *DISPATCHER(void *id)
 {
     MessageQueue *queue = (MessageQueue *)id;
     char msg[MAX_LEN_MSG];
@@ -180,8 +154,67 @@ void *DISPATCHER_THREAD_FUNCTION(void *id)
 }
 
 
+void *CONSOLE_READER(void *id)
+{
+    int fd;
+    char *buffer;
+    if ((fd = open(CONSOLE_PIPE, O_WRONLY)) < 0)
+    {
+        perror("Cannot open pipe for reading: ");
+        pthread_exit(0);
+    }
+    MessageQueue *queue = (MessageQueue *)id;
+    char msg[MAX_LEN_MSG];
+    while(1)
+    {
+        read(fd, &buffer, sizeof(buffer));
+        MessageQueueEnqueue(queue, msg);
+    }
+
+}
+
+
+
+
+void *SENSOR_READER(void *id)
+{
+    int fd;
+    char *buffer;
+    if ((fd = open(SENSOR_PIPE, O_WRONLY)) < 0)
+    {
+        perror("Cannot open pipe for reading: ");
+        pthread_exit(0);
+    }
+    MessageQueue *queue = (MessageQueue *)id;
+    char msg[MAX_LEN_MSG];
+    while(1)
+    {
+        read(fd, &buffer, sizeof(buffer));
+        MessageQueueEnqueue(queue, msg);
+    }
+}
+
+void WORKER(int id)
+{
+
+}
+
+void ALERTS_WATCHER(int id)
+{
+
+}
+
+
+
+
 int main(int argc, char *argv[])
 {
+    //setting up configurations
+    setup();
+
+    signal(SIGINT,ctrlc_handler);
+
+    //creating named pipes
     if ((mkfifo(SENSOR_PIPE, O_CREAT|O_EXCL|0600)<0) && (errno!= EEXIST)) { perror("Cannot create SENSOR_PIPE: ");
 
     }
@@ -189,38 +222,30 @@ int main(int argc, char *argv[])
 
     }
 
-    //funcoes de destroir named pipes
-    //unlink(SENSOR_PIPE);
-    //unlink(SENSOR_PIPE);
-    MessageQueue queue;
-    MessageQueueInitial(&queue);
 
-    //setting up configurations
-    int *config = SETUP();
-    int N_WORKERS = config[1];
-    int MAX_SENSORS = config[3];
+    //creating shared memory
+    create_shared_memory();
+
+
+
+    if(shmid == -1)
+    {
+        perror("Error in creating shared memory\n");
+    }
+
+
 
     int WORKER_PIPE[2];
     int i;
     int id;
 
-    // Create the sensor threads
-    int num_sensors = MAX_SENSORS;
-    pthread_t sensor_threads[num_sensors];
-    int sensor_ids[num_sensors];
-    for (int i = 0; i < num_sensors; i++)
-    {
-        sensor_ids[i] = i;
-        pthread_create(&sensor_threads[i], NULL, SENSOR_THREAD, &sensor_ids[i]);
-    }
-
 
     //Initializing threads and child processes
     long thread_id[3];
-    int child_id[N_WORKERS+MAX_SENSORS+1];
+    int process_id[N_WORKERS+1];
 
     pthread_t threads[3];
-    pid_t workers[N_WORKERS];
+    pid_t worker;
     pid_t alerts_watcher;
 
 
@@ -228,37 +253,28 @@ int main(int argc, char *argv[])
     pthread_create(&threads[0],NULL,DISPATCHER,&thread_id[0]);
 
     thread_id[1] = 1;
-    pthread_create(&threads[0],NULL,SENSOR_READER,&thread_id[1]);
+    pthread_create(&threads[1],NULL,SENSOR_READER,&thread_id[1]);
 
     thread_id[2] = 2;
-    pthread_create(&threads[0],NULL,CONSOLE_READER,&thread_id[2]);
+    pthread_create(&threads[2],NULL,CONSOLE_READER,&thread_id[2]);
 
-    pthread_t reader_thread, dispatcher_thread;
-    pthread_create(&reader_thread, NULL, READER_THREAD_FUNCTION, &queue);
-    pthread_create(&dispatcher_thread, NULL, DISPATCHER_THREAD_FUNCTION, &queue);
-
-    pthread_join(reader_thread, NULL);
-    pthread_join(dispatcher_thread, NULL);
-
-    //signal(SIGINT,funcao de limpeza do sistema);
-
-    //struct sigaction novo;
-    //novo.sa_handler = ctrlc_handler;
-    //sigfillset(&novo.sa_mask);
-    //novo.sa_flags = 0;
-    //sigaction(SIGINT,&novo,NULL);
+    for(int i = 0; i < 3; i++)
+    {
+        pthread_join(threads[i],NULL);
+    }
 
     pipe(WORKER_PIPE);
 
-    for(i = 3; i < N_WORKERS+1;i++)
+    for(i = 0; i < N_WORKERS+1;i++)
     {
-        if((id = fork() ) == 0)
+        if( (id = fork() ) == 0)
         {
-            if (i == N_WORKERS + 3)
+            process_id[i] = i;
+            if (i == 0)
                 ALERTS_WATCHER(id);
             else
-
                 WORKER(id);
         }
     }
+
 }
