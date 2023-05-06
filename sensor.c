@@ -1,9 +1,11 @@
 //
-// Created by Marco Lucas on 31/03/2023.
+// Marco Lucas 2021219146
+// Bruno Almeida 2021237081
+
+// Sistemas Operativos
+// Licenciatura em Engenharia Informática 2022/2023
 //
 #include "processes.h"
-
-
 int message_counter = 0;
 
 
@@ -45,22 +47,24 @@ int main(int argc, char *argv[])
     int max,min;
     int num;
     int fd;
-
-    if ((fd = open(SENSOR_PIPE, O_WRONLY)) < 0)
+    signal(SIGINT, ctrlc_handler);
+    printf("OPENING SENSOR PIPE FOR WRITING\n");
+    if ( ( fd = open(SENSOR_PIPE, O_WRONLY) ) < 0)
     {
-        perror("Cannot open pipe for writing: ");
+        perror("Cannot open SENSOR PIPE for WRITING: ");
+        exit(0);
     }
-
+    printf("AFTER OPENING SENSOR PIPE FOR WRITING\n");
     min = atoi(argv[4]);
     max = atoi(argv[5]);
 
     while(1)
     {
-        signal(SIGINT, ctrlc_handler);
         num = rand()%(max-min) + min;
-        snprintf(buffer,sizeof(buffer),"%s#%s#%d",argv[1],argv[3],num);
-        write(fd,buffer,sizeof(buffer));
-        usleep(atoi(argv[2]));
+        printf("%d\n",num);
+        snprintf(buffer,MAX_LEN_MSG,"%s#%s#%d",argv[1],argv[3],num);
+        write(fd,buffer,MAX_LEN_MSG);
+        sleep(atoi(argv[2]));
         message_counter +=1;
     }
 }
