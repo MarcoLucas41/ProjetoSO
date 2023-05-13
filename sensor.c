@@ -7,6 +7,8 @@
 //
 #include "processes.h"
 int message_counter = 0;
+InternalQueueBlock block;
+int sensor_id;
 
 
 void ctrlz_handler(int signo)
@@ -48,22 +50,22 @@ int main(int argc, char *argv[])
     int num;
     int fd;
     signal(SIGINT, ctrlc_handler);
-    printf("OPENING SENSOR PIPE FOR WRITING\n");
     if ( ( fd = open(SENSOR_PIPE, O_WRONLY) ) < 0)
     {
         perror("Cannot open SENSOR PIPE for WRITING: ");
         exit(0);
     }
-    printf("AFTER OPENING SENSOR PIPE FOR WRITING\n");
     min = atoi(argv[4]);
     max = atoi(argv[5]);
+    strcpy(block.id,argv[1]);
 
     while(1)
     {
         num = rand()%(max-min) + min;
         printf("%d\n",num);
         snprintf(buffer,MAX_LEN_MSG,"%s#%s#%d",argv[1],argv[3],num);
-        write(fd,buffer,MAX_LEN_MSG);
+        strcpy(block.command,buffer);
+        write(fd,&block,sizeof(block));
         sleep(atoi(argv[2]));
         message_counter +=1;
     }
