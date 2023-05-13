@@ -31,10 +31,24 @@
 
 void setup();
 int QUEUE_SZ,N_WORKERS,MAX_KEYS,MAX_SENSORS,MAX_ALERTS;
+int msqid;
 FILE *system_config;
 FILE *system_log;
 char timestamp[10];
 sem_t *mutex_log;
+
+int write_pos, read_pos;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+sem_t empty;
+sem_t full;
+
+
+void error(char*message)
+{
+    printf("ERROR: %s\n",message);
+    exit(1);
+}
+
 
 char* get_time()
 {
@@ -47,14 +61,15 @@ char* get_time()
 
 void logging(char *message)
 {
-    system_log = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Log.txt", "a+");
-    //system_log = fopen("/home/kamiguru/Desktop/so/proj/Log.txt", "a+");
+    //system_log = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Log.txt", "a+");
+    system_log = fopen("/home/kamiguru/Desktop/so/proj/Log.txt", "a+");
     fprintf(system_log,"%s %s\n",get_time(),message);
     fclose(system_log);
 }
 
 void wrong_command(char * buffer)
 {
+    printf("WRONG COMMAND\n");
     char message[MAX_LEN_MSG + 50];
     sem_wait(mutex_log);
     snprintf(message,MAX_LEN_MSG,"WRONG COMMAND => %s",buffer);
@@ -62,85 +77,43 @@ void wrong_command(char * buffer)
     sem_post(mutex_log);
 }
 
+typedef struct InternalQueueBlock
+{
+    char id[33];
+    char command[MAX_LEN_MSG];
+}InternalQueueBlock;
+
+
 typedef struct {
-    const int queue_sz;
-    char *messages[MAX_LEN_MSG];
-    int ri; //index do read
-    int wi; //index do write
-    int count;
-    pthread_mutex_t lock;
-    pthread_cond_t not_full;
-    pthread_cond_t not_empty;
-} InternalQueue;
+    InternalQueueBlock* listBlocks;
+}InternalQueue;
+
+typedef struct SharedData{
+    pthread_cond_t alertCond;
+    pthread_mutex_t alertMutex;
+}SharedData;
 
 
 void InternalQueueInitial(InternalQueue *queue)
 {
-    memset(queue->messages, 0, sizeof(queue->messages));
-    queue->ri = 0; //index do read
-    queue->wi = 0; //index do write
-    queue->count = 0;
-
-    pthread_mutex_init(&queue->lock, NULL);
-    pthread_cond_init(&queue->not_full, NULL);
-    pthread_cond_init(&queue->not_empty, NULL);
+    queue->listBlocks = (InternalQueueBlock *) malloc(sizeof(InternalQueueBlock)*QUEUE_SZ);
+    sem_init(&empty, 0, QUEUE_SZ);
+    sem_init(&full, 0, 0);
+    write_pos = read_pos = 0;
 }
-
-void InternalQueueEnqueue(InternalQueue *queue, const char *message)
-{
-    pthread_mutex_lock(&queue->lock);
-    while (queue->count == QUEUE_SZ)
-    {
-        pthread_cond_wait(&queue->not_full, &queue->lock);
-    }
-
-    strncpy(queue->messages[queue->wi], message, MAX_LEN_MSG);
-    queue->wi = (queue->wi + 1) % QUEUE_SZ;
-    queue->count++;
-
-    pthread_mutex_unlock(&queue->lock);
-    pthread_cond_signal(&queue->not_empty);
-}
-
-void InternalQueueDequeue(InternalQueue *queue, char *message)
-{
-    pthread_mutex_lock(&queue->lock);
-
-    while (queue->count == 0) {
-        pthread_cond_wait(&queue->not_empty, &queue->lock);
-    }
-
-    strncpy(message, queue->messages[queue->ri], MAX_LEN_MSG);
-    queue->messages[queue->ri][0] = '\0';
-
-    // Clearing the message
-    queue->ri = (queue->ri + 1) % QUEUE_SZ;
-    queue->count--;
-
-    pthread_mutex_unlock(&queue->lock);
-    pthread_cond_signal(&queue->not_full);
-}
-
-
-
-
-
-
-
-
 
 void setup()
 {
     int configurations[5];
     char line[10];
-    system_config = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Config.txt", "r");
-    //system_config = fopen("/home/kamiguru/Desktop/so/proj/Config.txt", "r");
+    //system_config = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Config.txt", "r");
+    system_config = fopen("/home/kamiguru/Desktop/so/proj/Config.txt", "r");
     sem_unlink("MUTEX_LOG");
     mutex_log = sem_open("MUTEX_LOG",O_CREAT|O_EXCL,0700,1);
 
     sem_wait(mutex_log);
-    system_log = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Log.txt", "w");
-    //system_log = fopen("/home/kamiguru/Desktop/so/proj/Log.txt", "w");
+    //system_log = fopen("/Users/marcolucas/sharedfoldervm/projetoSO/Log.txt", "w");
+    system_log = fopen("/home/kamiguru/Desktop/so/proj/Log.txt", "w");
     fprintf(system_log,"%s %s\n",get_time(),"HOME_IOT SIMULATOR STARTING");
     fclose(system_log);
     sem_post(mutex_log);
@@ -195,251 +168,310 @@ void setup()
 
 typedef struct SensorStats
 {
-    char *key;
+    char key[33];
     int latest_value;
     int min_value;
     int max_value;
     int total;
     double avg_values;
     int counter_updates_key;
-    struct SensorStats *next;
 }SensorStats;
 
 typedef struct Alerts
 {
-    char *id;
-    char *key;
+    char id[33];
+    char key[33];
+    int status;
     int min_value;
     int max_value;
-    struct Alerts *next;
 }Alerts;
 
 typedef struct Sensors
 {
-    char *id;
-    struct Sensors *next;
+    char id[33];
 }Sensors;
 
-typedef struct ArrayStats
+
+typedef struct MessageStruct
 {
-    SensorStats *first;
-    SensorStats *last;
-}ArrayStats;
+    long mtype;
+    char message[MAX_LEN_MSG];
+}MessageStruct;
 
-typedef struct ArrayAlerts
+
+
+SensorStats* SEARCH_KEY(SensorStats *pointer, char* key)
 {
-    Alerts *first;
-    Alerts *last;
-}ArrayAlerts;
-
-typedef struct ArraySensors
-{
-    Sensors *first;
-    Sensors *last;
-}ArraySensors;
-
-
-typedef struct SharedMemory
-{
-
-
-    //archive of keys and sensor data stats
-    ArrayStats *header1;
-
-    //archive of alerts
-    ArrayAlerts *header2;
-
-    //array of sensors that have communicated with system
-    ArraySensors *header3;
-
-    int alerts_counter,keys_counter,sensors_counter;
-
-}SharedMemory;
-
-
-void LIST_STATS(SensorStats *pointer)
-{
-    printf("KEY     LAST    MIN     MAX     AVG     COUNT\n");
-    while(pointer != NULL)
+    int counter = 0;
+    while( ( pointer->key[0] == '\0'|| strcmp(pointer->key,key) != 0 ) && counter < MAX_KEYS)
     {
-        printf("%s      %d      %d      %d      %.2lf      %d\n",pointer->key,pointer->latest_value,pointer->min_value,
-               pointer->max_value,pointer->avg_values,pointer->counter_updates_key);
-        pointer = pointer->next;
-    }
-}
-
-void LIST_SENSORS(Sensors *pointer)
-{
-    printf("ID\n");
-    while(pointer != NULL)
-    {
-        printf("%s\n",pointer->id);
-        pointer = pointer->next;
-    }
-}
-
-void LIST_ALERTS(Alerts *pointer)
-{
-    printf("ID      KEY     MIN     MAX\n");
-    while(pointer != NULL)
-    {
-        printf("%s      %s      %d      %d\n",pointer->id,pointer->key,pointer->min_value,
-               pointer->max_value);
-        pointer = pointer->next;
-    }
-}
-
-int CHECK_EMPTY_ARRAYSTATS(ArrayStats *pointer)
-{
-    if(pointer->first == NULL) return 1;
-    else return 0;
-}
-
-int CHECK_EMPTY_ARRAYALERTS(ArrayAlerts *pointer)
-{
-    if(pointer->first == NULL) return 1;
-    else return 0;
-}
-
-int CHECK_EMPTY_ARRAYSENSORS(ArraySensors *pointer)
-{
-    if(pointer->first == NULL) return 1;
-    else return 0;
-}
-
-void RESET_ARRAYSTATS(ArrayStats *pointer)
-{
-    SensorStats *temp;
-    while(!(CHECK_EMPTY_ARRAYSTATS(pointer)))
-    {
-        temp = pointer->first;
-        pointer->first = pointer->first->next;
-        free(temp);
-    }
-    pointer->last = NULL;
-    //printf("OK\n");
-
-}
-
-void RESET_ARRAYALERTS(ArrayAlerts *pointer)
-{
-    Alerts *temp;
-    while(!(CHECK_EMPTY_ARRAYALERTS(pointer)))
-    {
-        temp = pointer->first;
-        pointer->first = pointer->first->next;
-        free(temp);
-    }
-    pointer->last = NULL;
-    //printf("OK\n");
-}
-
-void RESET_ARRAYSENSORS(ArraySensors *pointer)
-{
-    Sensors *temp;
-    while(!(CHECK_EMPTY_ARRAYSENSORS(pointer)))
-    {
-        temp = pointer->first;
-        pointer->first = pointer->first->next;
-        free(temp);
-    }
-    pointer->last = NULL;
-}
-
-void REMOVE_ALERT(ArrayAlerts *pointer,char *id)
-{
-    Alerts *temp;
-    Alerts *father;
-    father = pointer->first;
-    temp = father->next;
-    while(temp != NULL || temp->id != id)
-    {
-        father = father->next;
-        temp = temp->next;
-    }
-    father->next = temp->next;
-    free(temp);
-
-}
-int UPDATE_STATS(ArrayStats *pointer, char*key, int value)
-{
-    SensorStats *temp;
-    temp = pointer->first;
-    if(temp == NULL)
-    {
-        return 0;
-    }
-
-    //SEARCH FOR KEY
-    while(strcmp(temp->key,key) != 0)
-    {
-        temp = temp->next;
-        if(temp == NULL)
+        if(pointer->key[0] == '\0')
         {
-            return 0;
+            pointer+=1;
+            counter += 1;
+            continue;
         }
+        pointer+=1;
+        counter += 1;
     }
-    if(temp != NULL)
+    if(strcmp(pointer->key,key) == 0) return pointer;
+    return NULL;
+}
+
+void LIST_STATS(SensorStats *pointer,int msqid,MessageStruct mq)
+{
+    int counter = 0;
+    strcpy(mq.message,"KEY     LAST    MIN     MAX     AVG     COUNT\n");
+    msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
+    while(counter < MAX_KEYS)
     {
-        temp->latest_value = value;
-        if(value > temp->max_value)
+        if(pointer->key[0] != '\0')
         {
-            temp->max_value = value;
+            snprintf(mq.message,sizeof(mq.message),"%s      %d      %d      %d      %.2lf      %d\n",pointer->key,pointer->latest_value,pointer->min_value,pointer->max_value,pointer->avg_values,pointer->counter_updates_key);
+            msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
         }
-        if(value < temp->max_value)
+        pointer+=1;
+        counter+=1;
+    }
+}
+
+void LIST_SENSORS(Sensors *pointer,int msqid,MessageStruct mq)
+{
+    int counter = 0;
+    strcpy(mq.message,"ID\n");
+    msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
+    while(counter < MAX_SENSORS)
+    {
+        if(pointer->id[0] != '\0')
         {
-            temp->min_value = value;
+            snprintf(mq.message,sizeof(mq.message),"%s\n",pointer->id);
+            msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
         }
-        temp->counter_updates_key += 1;
-        temp->total += value;
-        temp->avg_values = temp->total/temp->counter_updates_key;
-        return 1;
+        pointer+=1;
+        counter+=1;
+    }
+}
+
+void LIST_ALERTS(Alerts *pointer,int msqid,MessageStruct mq)
+{
+    int counter = 0;
+    strcpy(mq.message,"ID      KEY     MIN     MAX\n");
+    msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
+    while(counter < MAX_ALERTS)
+    {
+        if(pointer->id[0] != '\0')
+        {
+            snprintf(mq.message,sizeof(mq.message),"%s      %s      %d      %d\n",pointer->id,pointer->key,pointer->min_value,
+                     pointer->max_value);
+            msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
+        }
+        pointer+=1;
+        counter+=1;
+    }
+}
+
+void RESET_ARRAYSTATS(SensorStats *pointer)
+{
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        pointer->key[0] = '\0';
+        pointer->max_value = 0;
+        pointer->min_value = 0;
+        pointer->counter_updates_key = 0;
+        pointer->total = 0;
+        pointer->avg_values = 0;
+        pointer += 1;
+    }
+
+
+}
+
+void RESET_ARRAYALERTS(Alerts *pointer)
+{
+    for(int i = 0; i < MAX_ALERTS; i++)
+    {
+        pointer->id[0] = '\0';
+        pointer->key[0] = '\0';
+        pointer->max_value = 0;
+        pointer->min_value = 0;
+        pointer->status = 0;
+        pointer += 1;
+    }
+}
+
+void RESET_ARRAYSENSORS(Sensors *pointer)
+{
+    for(int i = 0; i < MAX_ALERTS; i++)
+    {
+        pointer->id[0] = '\0';
+        pointer += 1;
+    }
+}
+
+int REMOVE_ALERT(Alerts *pointer,char *id)
+{
+    for(int i = 0; i < MAX_ALERTS; i++)
+    {
+        if(strcmp(id,pointer->id) == 0)
+        {
+            pointer->id[0] = '\0';
+            pointer->key[0] = '\0';
+            pointer->max_value = 0;
+            pointer->min_value = 0;
+            pointer->status = 0;
+            return 1;
+        }
+        pointer += 1;
+    }
+    return 0;
+
+}
+int UPDATE_STATS(SensorStats *pointer, char*key, int value)
+{
+    for(int i = 0; i < MAX_ALERTS; i++)
+    {
+        if(strcmp(key,pointer->key) == 0)
+        {
+            pointer->latest_value = value;
+            if(value > pointer->max_value)
+            {
+                pointer->max_value = value;
+            }
+            if(value < pointer->max_value)
+            {
+                pointer->min_value = value;
+            }
+            pointer->counter_updates_key += 1;
+            pointer->total += value;
+            pointer->avg_values = pointer->total/pointer->counter_updates_key;
+            return 1;
+        }
+        pointer += 1;
+    }
+    return 0;
+
+}
+
+
+int ADD_KEY(SensorStats *pointer, char*key, int value)
+{
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        if(pointer->key[0] == '\0')
+        {
+            strcpy(pointer->key,key);
+            pointer->latest_value = value;
+            pointer->max_value = value;
+            pointer->min_value = value;
+            pointer->counter_updates_key = 0;
+            pointer->total = value;
+            pointer->avg_values = value;
+            return 1;
+        }
+        pointer += 1;
+    }
+    return 0;
+}
+
+int ADD_SENSOR(Sensors *pointer, char*id)
+{
+    for(int i = 0; i < MAX_KEYS; i++)
+    {
+        if(pointer->id[0] == '\0')
+        {
+            strcpy(pointer->id,id);
+            return 1;
+        }
+        pointer += 1;
+    }
+    return 0;
+}
+
+
+Sensors* SEARCH_SENSOR(Sensors *pointer,char *id)
+{
+    int counter = 0;
+    while( ( pointer->id[0] == '\0' || strcmp(pointer->id,id) != 0 ) && counter < MAX_SENSORS)
+    {
+        if(pointer->id[0] == '\0')
+        {
+            pointer+=1;
+            counter += 1;
+            continue;
+        }
+        pointer+=1;
+        counter += 1;
+    }
+    if(strcmp(pointer->id,id) == 0) return pointer;
+    return NULL;
+}
+
+Alerts* SEARCH_ALERT(Alerts *pointer,char *id)
+{
+    int counter = 0;
+    while( ( pointer->id[0] == '\0' || strcmp(pointer->id,id) != 0 ) && counter < MAX_ALERTS)
+    {
+        if(pointer->id[0] == '\0')
+        {
+            pointer+=1;
+            counter += 1;
+            continue;
+        }
+        pointer+=1;
+        counter += 1;
+    }
+    if(strcmp(pointer->id,id) == 0) return pointer;
+    return NULL;
+}
+
+Alerts* SEARCH_TRIGGERED_ALERT(Alerts *pointer)
+{
+    int counter = 0;
+    while(pointer->status == 0 && counter < MAX_ALERTS)
+    {
+        pointer+=1;
+        counter+=1;
+    }
+    if(pointer->status == 1)
+    {
+        printf("ALERT %s WAS TRIGGERED!\n",pointer->id);
+        return pointer;
+    }
+    else return NULL;
+
+}
+
+
+
+int ADD_ALERT(Alerts *pointer,int msqid,MessageStruct mq,char *id, char*key, int min, int max)
+{
+    int counter = 0;
+    if(SEARCH_ALERT(pointer,id) != NULL)
+    {
+        sem_wait(mutex_log);
+        logging("ERROR: ALERT ID ALREADY EXISTS");
+        sem_post(mutex_log);
+        strcpy(mq.message,"ERROR: ALERT ID ALREADY EXISTS\n");
+        msgsnd(msqid,&mq,sizeof(MessageStruct)-sizeof(long),0);
     }
     else
     {
-        return 0;
+        while(pointer->id[0] != '\0' && counter < MAX_ALERTS)
+        {
+            pointer +=1;
+            counter +=1;
+        }
+        if(pointer->id[0] == '\0')
+        {
+            strcpy(pointer->id,id);
+            strcpy(pointer->key,key);
+            pointer->status = 0;
+            pointer->min_value = min;
+            pointer->max_value = max;
+            return 1;
+        }
     }
+    return 0;
 }
 
-void ADD_KEY(ArrayStats *pointer, char*key, int value)
-{
-    SensorStats *temp = (SensorStats *) malloc(sizeof(SensorStats));
-    if(temp != NULL)
-    {
-        strcpy(temp->key,key);
-        temp->latest_value = value;
-        if(value > temp->max_value)
-        {
-            temp->max_value = value;
-        }
-        if(value < temp->max_value)
-        {
-            temp->min_value = value;
-        }
-        temp->counter_updates_key += 1;
-        temp->total += value;
-        temp->avg_values = temp->total/temp->counter_updates_key;
-        temp->next = NULL;
-        if(CHECK_EMPTY_ARRAYSTATS(pointer))
-            pointer->first = temp;
-        else pointer->last->next = temp;
-        pointer->last = temp;
-    }
-}
-
-void ADD_ALERT(ArrayAlerts *pointer,char *id, char*key, int min, int max)
-{
-    Alerts *temp;
-    temp = (Alerts *) malloc(sizeof(Alerts));
-    if (temp != NULL)
-    {
-        strcpy(temp->id,id);
-        strcpy(temp->key,key);
-        temp->next = NULL;
-        if(CHECK_EMPTY_ARRAYALERTS(pointer))
-            pointer->first = temp;
-        else pointer->last->next = temp;
-        pointer->last = temp;
-    }
-}
 #endif //PROJETOSO_PROCESSES_H
